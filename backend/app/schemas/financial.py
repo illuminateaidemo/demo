@@ -1,27 +1,27 @@
 """
-Financial schemas: billing milestones, WIP, and posting periods.
+Financial schemas: WIP, Billing Milestones, Posting Periods.
+
+Aligned with existing ORM models.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date, datetime
 from enum import Enum
 
 
-class BillingMilestoneStatus(str, Enum):
-    PLANNED = "PLANNED"
-    READY_TO_BILL = "READY_TO_BILL"
+class WIPStatus(str, Enum):
+    OPEN = "OPEN"
+    REVIEWED = "REVIEWED"
+    POSTED = "POSTED"
+    CLOSED = "CLOSED"
+
+
+class MilestoneStatus(str, Enum):
+    PENDING = "PENDING"
+    READY = "READY"
     INVOICED = "INVOICED"
     PAID = "PAID"
-    CANCELLED = "CANCELLED"
-    WRITTEN_OFF = "WRITTEN_OFF"
-
-
-class WIPStatus(str, Enum):
-    UNBILLED = "UNBILLED"
-    BILLED = "BILLED"
-    WRITTEN_OFF = "WRITTEN_OFF"
-    REVERSED = "REVERSED"
 
 
 class PeriodStatus(str, Enum):
@@ -31,30 +31,72 @@ class PeriodStatus(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# WIP Entry schemas
+# ---------------------------------------------------------------------------
+
+class WIPEntryResponse(BaseModel):
+    id: int
+    project_id: int
+    project_name: Optional[str] = None
+    period_year: int
+    period_month: int
+    hours_logged: float
+    cost_amount: float
+    bill_amount: float
+    wip_amount: float
+    status: str
+    reviewed_by_id: Optional[int] = None
+    posted_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class WIPEntryListResponse(BaseModel):
+    entries: list[WIPEntryResponse]
+    total: int
+
+
+class WIPReviewRequest(BaseModel):
+    notes: Optional[str] = None
+
+
+class WIPGenerateRequest(BaseModel):
+    year: int
+    month: int
+    project_ids: Optional[list[int]] = None
+
+
+class WIPSummaryEntry(BaseModel):
+    project_id: int
+    project_name: str
+    total_hours: float
+    total_cost: float
+    total_revenue: float
+    total_wip: float
+    margin: float
+
+
+class WIPSummaryResponse(BaseModel):
+    entries: list[WIPSummaryEntry]
+    grand_total_hours: float
+    grand_total_cost: float
+    grand_total_revenue: float
+    grand_total_wip: float
+    grand_total_margin: float
+
+
+# ---------------------------------------------------------------------------
 # Billing Milestone schemas
 # ---------------------------------------------------------------------------
 
 class BillingMilestoneBase(BaseModel):
     project_id: int
-    phase_id: Optional[int] = None
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    amount: float = Field(..., gt=0, description="Milestone billing amount")
-    currency: str = Field(default="GBP", max_length=3)
-    planned_date: date
+    amount: float = Field(..., gt=0)
+    currency: str = Field(default="USD", max_length=3)
     due_date: Optional[date] = None
-    status: BillingMilestoneStatus = BillingMilestoneStatus.PLANNED
-    invoice_number: Optional[str] = None
-    invoice_date: Optional[date] = None
-    payment_date: Optional[date] = None
-    notes: Optional[str] = None
-
-    @field_validator("amount")
-    @classmethod
-    def validate_amount(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("Milestone amount must be positive")
-        return round(v, 2)
 
 
 class BillingMilestoneCreate(BillingMilestoneBase):
@@ -62,26 +104,20 @@ class BillingMilestoneCreate(BillingMilestoneBase):
 
 
 class BillingMilestoneUpdate(BaseModel):
-    phase_id: Optional[int] = None
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     amount: Optional[float] = Field(None, gt=0)
     currency: Optional[str] = Field(None, max_length=3)
-    planned_date: Optional[date] = None
     due_date: Optional[date] = None
-    status: Optional[BillingMilestoneStatus] = None
-    invoice_number: Optional[str] = None
-    invoice_date: Optional[date] = None
-    payment_date: Optional[date] = None
-    notes: Optional[str] = None
 
 
 class BillingMilestoneResponse(BillingMilestoneBase):
     id: int
+    status: str
+    invoice_reference: Optional[str] = None
     project_name: Optional[str] = None
-    project_code: Optional[str] = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -89,64 +125,10 @@ class BillingMilestoneResponse(BillingMilestoneBase):
 class BillingMilestoneListResponse(BaseModel):
     milestones: list[BillingMilestoneResponse]
     total: int
-    total_amount: float = 0.0
-    total_invoiced: float = 0.0
-    total_paid: float = 0.0
 
 
-# ---------------------------------------------------------------------------
-# WIP (Work In Progress) schemas
-# ---------------------------------------------------------------------------
-
-class WIPEntryBase(BaseModel):
-    project_id: int
-    phase_id: Optional[int] = None
-    resource_id: Optional[int] = None
-    period_start: date
-    period_end: date
-    hours: float = Field(default=0, ge=0)
-    cost_amount: float = Field(default=0, ge=0)
-    bill_amount: float = Field(default=0, ge=0)
-    currency: str = Field(default="GBP", max_length=3)
-    status: WIPStatus = WIPStatus.UNBILLED
-    description: Optional[str] = None
-
-
-class WIPEntryResponse(WIPEntryBase):
-    id: int
-    project_name: Optional[str] = None
-    project_code: Optional[str] = None
-    resource_name: Optional[str] = None
-    posting_period_id: Optional[int] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    model_config = {"from_attributes": True}
-
-
-class WIPSummary(BaseModel):
-    """Aggregated WIP summary across projects or periods."""
-    total_hours: float = 0.0
-    total_cost: float = 0.0
-    total_bill_value: float = 0.0
-    total_unbilled: float = 0.0
-    total_billed: float = 0.0
-    total_written_off: float = 0.0
-    by_project: dict[str, float] = Field(
-        default_factory=dict,
-        description="Project code -> unbilled WIP value"
-    )
-    by_resource: dict[str, float] = Field(
-        default_factory=dict,
-        description="Resource name -> unbilled WIP value"
-    )
-    currency: str = "GBP"
-
-
-class WIPEntryListResponse(BaseModel):
-    entries: list[WIPEntryResponse]
-    total: int
-    summary: Optional[WIPSummary] = None
+class InvoicedRequest(BaseModel):
+    invoice_reference: str = Field(..., min_length=1)
 
 
 # ---------------------------------------------------------------------------
@@ -154,39 +136,21 @@ class WIPEntryListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PostingPeriodBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100, description="e.g. '2025-01' or 'Jan 2025'")
-    start_date: date
-    end_date: date
-    status: PeriodStatus = PeriodStatus.OPEN
-    notes: Optional[str] = None
-
-    @field_validator("end_date")
-    @classmethod
-    def period_end_after_start(cls, v: date, info) -> date:
-        start = info.data.get("start_date")
-        if start is not None and v < start:
-            raise ValueError("Period end_date must be on or after start_date")
-        return v
+    year: int
+    month: int = Field(..., ge=1, le=12)
 
 
 class PostingPeriodCreate(PostingPeriodBase):
     pass
 
 
-class PostingPeriodUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    status: Optional[PeriodStatus] = None
-    notes: Optional[str] = None
-
-
 class PostingPeriodResponse(PostingPeriodBase):
     id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    total_wip_value: Optional[float] = None
-    total_billed: Optional[float] = None
+    status: str
+    opened_by_id: Optional[int] = None
+    opened_at: Optional[datetime] = None
+    closed_by_id: Optional[int] = None
+    closed_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -197,25 +161,11 @@ class PostingPeriodListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Revenue Recognition schemas
+# Export schema
 # ---------------------------------------------------------------------------
 
-class RevenueRecognitionEntry(BaseModel):
-    project_id: int
-    project_name: Optional[str] = None
-    project_code: Optional[str] = None
-    period_name: str
-    recognised_revenue: float = 0.0
-    deferred_revenue: float = 0.0
-    accrued_revenue: float = 0.0
-    total_contract_value: float = 0.0
-    pct_complete: float = Field(default=0.0, ge=0, le=100)
-    currency: str = "GBP"
-
-
-class RevenueRecognitionReport(BaseModel):
-    period_name: str
-    entries: list[RevenueRecognitionEntry] = []
-    total_recognised: float = 0.0
-    total_deferred: float = 0.0
-    total_accrued: float = 0.0
+class FinancialExportResponse(BaseModel):
+    export_date: datetime
+    wip_entries: list[WIPEntryResponse]
+    milestones: list[BillingMilestoneResponse]
+    periods: list[PostingPeriodResponse]

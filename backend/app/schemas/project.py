@@ -1,8 +1,10 @@
 """
-Project, project phase, and project health log schemas.
+Project, ProjectPhase, and ProjectHealthLog schemas.
+
+Aligned with existing ORM models.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date, datetime
 from enum import Enum
@@ -10,7 +12,6 @@ from enum import Enum
 
 class ProjectStatus(str, Enum):
     DRAFT = "DRAFT"
-    PLANNING = "PLANNING"
     ACTIVE = "ACTIVE"
     ON_HOLD = "ON_HOLD"
     COMPLETED = "COMPLETED"
@@ -18,93 +19,77 @@ class ProjectStatus(str, Enum):
 
 
 class CommercialModel(str, Enum):
-    TIME_AND_MATERIALS = "TIME_AND_MATERIALS"
     FIXED_PRICE = "FIXED_PRICE"
+    TIME_AND_MATERIALS = "TIME_AND_MATERIALS"
     RETAINER = "RETAINER"
-    MANAGED_SERVICE = "MANAGED_SERVICE"
-    MIXED = "MIXED"
+    MILESTONE = "MILESTONE"
 
 
 class HealthStatus(str, Enum):
     GREEN = "GREEN"
     AMBER = "AMBER"
     RED = "RED"
-    NOT_SET = "NOT_SET"
+
+
+class PhaseStatus(str, Enum):
+    PLANNED = "PLANNED"
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
 
 
 # ---------------------------------------------------------------------------
-# Project Phase schemas
+# ProjectPhase schemas
 # ---------------------------------------------------------------------------
 
 class ProjectPhaseBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    budget_hours: Optional[float] = Field(None, ge=0)
-    budget_amount: Optional[float] = Field(None, ge=0)
-    status: ProjectStatus = ProjectStatus.DRAFT
+    budget_hours: Optional[float] = None
+    budget_amount: Optional[float] = None
+    status: PhaseStatus = PhaseStatus.PLANNED
     sort_order: int = 0
-
-    @field_validator("end_date")
-    @classmethod
-    def phase_end_after_start(cls, v: Optional[date], info) -> Optional[date]:
-        start = info.data.get("start_date")
-        if v is not None and start is not None and v < start:
-            raise ValueError("Phase end_date must be on or after start_date")
-        return v
 
 
 class ProjectPhaseCreate(ProjectPhaseBase):
-    project_id: int
+    pass
 
 
 class ProjectPhaseUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    budget_hours: Optional[float] = Field(None, ge=0)
-    budget_amount: Optional[float] = Field(None, ge=0)
-    status: Optional[ProjectStatus] = None
+    budget_hours: Optional[float] = None
+    budget_amount: Optional[float] = None
+    status: Optional[PhaseStatus] = None
     sort_order: Optional[int] = None
 
 
 class ProjectPhaseResponse(ProjectPhaseBase):
     id: int
     project_id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
 
 # ---------------------------------------------------------------------------
-# Project Health Log schemas
+# HealthLog schemas
 # ---------------------------------------------------------------------------
 
-class ProjectHealthLogBase(BaseModel):
-    overall_health: HealthStatus
-    scope_health: HealthStatus = HealthStatus.NOT_SET
-    schedule_health: HealthStatus = HealthStatus.NOT_SET
-    budget_health: HealthStatus = HealthStatus.NOT_SET
-    risk_health: HealthStatus = HealthStatus.NOT_SET
-    summary: Optional[str] = None
-    risks: Optional[str] = None
-    issues: Optional[str] = None
-    next_steps: Optional[str] = None
-    reported_by_id: Optional[int] = None
+class HealthLogCreate(BaseModel):
+    status: HealthStatus
+    narrative: Optional[str] = None
 
 
-class ProjectHealthLogCreate(ProjectHealthLogBase):
-    project_id: int
-
-
-class ProjectHealthLogResponse(ProjectHealthLogBase):
+class HealthLogResponse(BaseModel):
     id: int
     project_id: int
-    reported_at: datetime
-    reported_by_name: Optional[str] = None
+    status: str
+    narrative: Optional[str] = None
+    logged_by_id: Optional[int] = None
+    logged_by_name: Optional[str] = None
+    logged_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -115,32 +100,22 @@ class ProjectHealthLogResponse(ProjectHealthLogBase):
 
 class ProjectBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    code: str = Field(..., min_length=1, max_length=50, description="Unique project code")
+    code: str = Field(..., min_length=1, max_length=50)
     client_id: int
     opportunity_id: Optional[int] = None
-    description: Optional[str] = None
+    project_manager_id: Optional[int] = None
     status: ProjectStatus = ProjectStatus.DRAFT
-    commercial_model: CommercialModel = CommercialModel.TIME_AND_MATERIALS
+    commercial_model: Optional[CommercialModel] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    budget_hours: float = Field(default=0, ge=0)
-    budget_amount: float = Field(default=0, ge=0)
-    currency: str = Field(default="GBP", max_length=3)
-    bill_rate: Optional[float] = Field(None, ge=0, description="Default billing rate per hour")
-    cost_rate: Optional[float] = Field(None, ge=0, description="Default cost rate per hour")
+    budget_hours: Optional[float] = Field(None, ge=0)
+    budget_amount: Optional[float] = Field(None, ge=0)
+    currency: str = "USD"
+    description: Optional[str] = None
+    health_status: HealthStatus = HealthStatus.GREEN
+    health_narrative: Optional[str] = None
     practice: Optional[str] = None
-    delivery_lead_id: Optional[int] = None
-    project_manager_id: Optional[int] = None
     office: Optional[str] = None
-    notes: Optional[str] = None
-
-    @field_validator("end_date")
-    @classmethod
-    def end_after_start(cls, v: Optional[date], info) -> Optional[date]:
-        start = info.data.get("start_date")
-        if v is not None and start is not None and v < start:
-            raise ValueError("end_date must be on or after start_date")
-        return v
 
 
 class ProjectCreate(ProjectBase):
@@ -152,35 +127,28 @@ class ProjectUpdate(BaseModel):
     code: Optional[str] = Field(None, min_length=1, max_length=50)
     client_id: Optional[int] = None
     opportunity_id: Optional[int] = None
-    description: Optional[str] = None
+    project_manager_id: Optional[int] = None
     status: Optional[ProjectStatus] = None
     commercial_model: Optional[CommercialModel] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     budget_hours: Optional[float] = Field(None, ge=0)
     budget_amount: Optional[float] = Field(None, ge=0)
-    currency: Optional[str] = Field(None, max_length=3)
-    bill_rate: Optional[float] = Field(None, ge=0)
-    cost_rate: Optional[float] = Field(None, ge=0)
+    currency: Optional[str] = None
+    description: Optional[str] = None
+    health_status: Optional[HealthStatus] = None
+    health_narrative: Optional[str] = None
     practice: Optional[str] = None
-    delivery_lead_id: Optional[int] = None
-    project_manager_id: Optional[int] = None
     office: Optional[str] = None
-    notes: Optional[str] = None
 
 
 class ProjectResponse(ProjectBase):
     id: int
     created_at: datetime
-    updated_at: Optional[datetime] = None
-    client_name: Optional[str] = None
-    delivery_lead_name: Optional[str] = None
-    project_manager_name: Optional[str] = None
-    latest_health: Optional[HealthStatus] = None
+    updated_at: datetime
     phases: list[ProjectPhaseResponse] = []
-    actual_hours: Optional[float] = None
-    actual_cost: Optional[float] = None
-    budget_consumed_pct: Optional[float] = None
+    client_name: Optional[str] = None
+    manager_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -190,12 +158,25 @@ class ProjectListResponse(BaseModel):
     total: int
 
 
-class ProjectSummary(BaseModel):
-    """Lightweight project reference used in dropdowns and lists."""
-    id: int
-    name: str
-    code: str
-    client_name: Optional[str] = None
-    status: ProjectStatus
+class ProjectFinancialSummary(BaseModel):
+    project_id: int
+    project_name: str
+    budget_hours: Optional[float] = None
+    budget_amount: Optional[float] = None
+    actual_hours: float = 0.0
+    actual_cost: float = 0.0
+    actual_revenue: float = 0.0
+    hours_remaining: Optional[float] = None
+    budget_remaining: Optional[float] = None
+    margin_percentage: Optional[float] = None
 
-    model_config = {"from_attributes": True}
+
+class ProjectTeamMember(BaseModel):
+    resource_id: int
+    user_name: str
+    grade: Optional[str] = None
+    role_on_project: Optional[str] = None
+    hours_per_week: float
+    start_date: date
+    end_date: date
+    allocation_status: str
